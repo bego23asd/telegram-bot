@@ -42,8 +42,8 @@ async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Auto-reply to clients with payment instructions."""
     # Ignore messages from the owner group (admins)
     if update.message.chat_id == OWNER_GROUP_ID:
-        return  
-    # Reply only to client messages
+        return
+
     await update.message.reply_text(AUTO_REPLY_TEXT)
 
 async def forward_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -102,10 +102,11 @@ async def owner_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("✅ Message sent to the client!")
 
 def run_telegram_bot():
+    """Starts the Telegram bot with long polling."""
     token = os.environ.get("7900770091:AAG6ysqNb3nDofaHZPQQuGsbwMCZcsVNKrM")
     if not token:
-        raise ValueError("BOT_TOKEN environment variable not set.")
-        
+        raise ValueError("⚠️ BOT_TOKEN environment variable is not set!")
+
     app = ApplicationBuilder().token(token).build()
 
     # Auto-reply only to client messages (ignore admin group messages)
@@ -125,14 +126,15 @@ flask_app = Flask(__name__)
 
 @flask_app.route("/")
 def index():
-    return "Bot is running."
+    return "Telegram Bot is running!"
 
 def run_flask():
+    """Runs the Flask app on the port Render provides."""
     port = int(os.environ.get("PORT", 5000))
     flask_app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    # Start Flask in a separate thread
+    # Start the Flask server in a separate thread
     threading.Thread(target=run_flask).start()
     # Run the Telegram bot (long polling)
     run_telegram_bot()
