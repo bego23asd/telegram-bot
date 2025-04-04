@@ -1,4 +1,6 @@
 import logging
+import os
+from flask import Flask, request
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -7,16 +9,27 @@ from telegram.ext import (
     filters
 )
 
-# Enable logging
+# -------------------------------
+# 🔹 Securely Fetch Telegram Bot Token
+# -------------------------------
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # Store in environment variable!
+
+if not TOKEN:
+    raise ValueError("⚠️ ERROR: TELEGRAM_BOT_TOKEN not set!")
+
+# -------------------------------
+# 🔹 Enable Logging
+# -------------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# Dictionary to store the mapping between forwarded messages and client chat IDs
-receipt_map = {}
-
-OWNER_GROUP_ID = -4676264326  # Replace with your actual owner group ID
+# -------------------------------
+# 🔹 Constants
+# -------------------------------
+OWNER_GROUP_ID = -4676264326  # Replace with actual owner group ID
+receipt_map = {}  # Store mapping of forwarded messages to client chat IDs
 
 AUTO_REPLY_TEXT = """💳 𝗖𝗔𝗦𝗜𝗡𝗢 𝗦𝗖𝗥𝗜𝗣𝗧 𝗣𝗔𝗬𝗠𝗘𝗡𝗧 𝗠𝗘𝗧𝗛𝗢𝗗𝗦  
 
@@ -34,21 +47,17 @@ AUTO_REPLY_TEXT = """💳 𝗖𝗔𝗦𝗜𝗡𝗢 𝗦𝗖𝗥𝗜𝗣𝗧 𝗣
 ━━━━━━━━━━━━━━━━━━━  
 """
 
-
-
-
+# -------------------------------
+# 🔹 Define Telegram Bot Handlers
+# -------------------------------
 async def auto_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Auto-reply to clients with payment instructions."""
-    
-    # Ignore messages from the owner group (admins)
+    """Auto-reply to client messages with payment instructions."""
     if update.message.chat_id == OWNER_GROUP_ID:
-        return  
-
-    # Reply only to client messages
+        return  # Ignore messages from the owner group
     await update.message.reply_text(AUTO_REPLY_TEXT)
 
 async def forward_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Forwards receipts to the admin group and stores client chat ID."""
+    """Forward receipts to the admin group and store client chat IDs."""
     user = update.message.from_user
     client_chat_id = update.message.chat_id
 
@@ -73,9 +82,7 @@ async def forward_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Processing... Please wait for your license key.")
 
 async def owner_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles owner's reply to a forwarded receipt and sends it to the client."""
-    
-    # Ensure the message is coming from the admin group
+    """Handle owner's reply to a forwarded receipt and send it back to the client."""
     if update.message.chat_id != OWNER_GROUP_ID:
         return  # Ignore messages outside the admin group
 
@@ -83,40 +90,50 @@ async def owner_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⚠️ Please reply to a forwarded receipt message.")
         return
 
-    # Check if the replied-to message is in receipt_map
-    replied_msg = update.message.reply_to_message
-    forwarded_msg_id = replied_msg.message_id
+    # Get forwarded message ID
+    forwarded_msg_id = update.message.reply_to_message.message_id
 
     if forwarded_msg_id not in receipt_map:
         await update.message.reply_text("⚠️ Cannot find client chat ID. Reply to a forwarded receipt message.")
         return
 
-    # Get the client chat ID
     client_chat_id = receipt_map[forwarded_msg_id]
 
     # Send the owner's reply to the client
-    await context.bot.send_message(
-        chat_id=client_chat_id,
-        text=f"{update.message.text}"
-    )
+    await context.bot.send_message(chat_id=client_chat_id, text=update.message.text)
 
-    # Confirm the message was sent
+    # Confirm message was sent
     await update.message.reply_text("✅ Message sent to the client!")
 
-def main():
-    app = ApplicationBuilder().token("7900770091:AAG6ysqNb3nDofaHZPQQuGsbwMCZcsVNKrM").build()
+# -------------------------------
+# 🔹 Initialize Telegram Bot
+# -------------------------------
+telegram_app = ApplicationBuilder().token(TOKEN).build()
 
-    # Auto-reply only to client messages (ignore admin group messages)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Chat(OWNER_GROUP_ID), auto_reply))
+# Register the handlers
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Chat(OWNER_GROUP_ID), auto_reply))
+telegram_app.add_handler(MessageHandler(filters.PHOTO, forward_receipt))
+telegram_app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & filters.Chat(OWNER_GROUP_ID), owner_reply_handler))
 
-    # Forward receipts to the owner group
-    app.add_handler(MessageHandler(filters.PHOTO, forward_receipt))
+# -------------------------------
+# 🔹 Create Flask Web App
+# -------------------------------
+flask_app = Flask(__name__)
 
-    # Detect replies in the owner group (no need for /command)
-    app.add_handler(MessageHandler(filters.REPLY & filters.TEXT & filters.Chat(OWNER_GROUP_ID), owner_reply_handler))
+@flask_app.route('/webhook', methods=['POST'])
+def webhook_handler():
+    """Receive updates from Telegram via webhook."""
+    update_json = request.get_json(force=True)
+    update = Update.de_json(update_json, telegram_app.bot)
+    telegram_app.process_update(update)
+    return 'OK', 200
 
-    print("🤖 Bot is running...")
-    app.run_polling()
+@flask_app.route('/')
+def index():
+    return "Telegram Bot Webhook Server Running"
 
-if __name__ == "__main__":
-    main()
+# -------------------------------
+# 🔹 Run Flask App (For Local Testing Only)
+# -------------------------------
+if __name__ == '__main__':
+    flask_app.run(host='0.0.0.0', port=5000)
